@@ -59,6 +59,9 @@ if "drive_token_info" not in st.session_state:
 if "drive_oauth_state" not in st.session_state:
     st.session_state["drive_oauth_state"] = None
 
+if "drive_code_verifier" not in st.session_state:
+    st.session_state["drive_code_verifier"] = None
+
 
 # =========================================
 # CONFIG GOOGLE
@@ -101,7 +104,6 @@ def limpar_query_params():
 # GOOGLE SHEETS / SERVICE ACCOUNT
 # =========================================
 def obter_credenciais_service_account():
-    # 1) Prioridade para secrets do Streamlit Cloud
     try:
         info = dict(st.secrets["gcp_service_account"])
         return ServiceAccountCredentials.from_service_account_info(
@@ -111,7 +113,6 @@ def obter_credenciais_service_account():
     except Exception:
         pass
 
-    # 2) Fallback para ambiente local
     if os.path.exists(SERVICE_ACCOUNT_FILE):
         return ServiceAccountCredentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE,
@@ -195,13 +196,17 @@ def obter_client_config_oauth():
     }
 
 
-def criar_flow_oauth_drive(state=None):
+def criar_flow_oauth_drive(state=None, code_verifier=None):
     flow = Flow.from_client_config(
         client_config=obter_client_config_oauth(),
         scopes=SCOPES_DRIVE_OAUTH,
         state=state
     )
     flow.redirect_uri = GOOGLE_REDIRECT_URI
+
+    if code_verifier:
+        flow.code_verifier = code_verifier
+
     return flow
 
 
@@ -211,10 +216,13 @@ def gerar_url_autorizacao_drive():
     authorization_url, state = flow.authorization_url(
         access_type="offline",
         include_granted_scopes="true",
-        prompt="consent"
+        prompt="consent",
+        autogenerate_code_verifier=True
     )
 
     st.session_state["drive_oauth_state"] = state
+    st.session_state["drive_code_verifier"] = flow.code_verifier
+
     return authorization_url
 
 
@@ -232,13 +240,23 @@ def processar_callback_oauth_drive():
         return
 
     state_esperado = st.session_state.get("drive_oauth_state")
+    code_verifier = st.session_state.get("drive_code_verifier")
+
     if state_esperado and state != state_esperado:
         st.error("Falha de segurança no retorno do Google (state inválido).")
         limpar_query_params()
         return
 
+    if not code_verifier:
+        st.error("Não foi possível concluir a autenticação do Google Drive: code_verifier ausente.")
+        limpar_query_params()
+        return
+
     try:
-        flow = criar_flow_oauth_drive(state=state)
+        flow = criar_flow_oauth_drive(
+            state=state,
+            code_verifier=code_verifier
+        )
         flow.fetch_token(code=code)
 
         creds = flow.credentials
@@ -252,6 +270,7 @@ def processar_callback_oauth_drive():
         }
 
         st.session_state["drive_oauth_state"] = None
+        st.session_state["drive_code_verifier"] = None
         limpar_query_params()
         st.success("Google Drive conectado com sucesso.")
         st.rerun()
@@ -311,6 +330,7 @@ def conectar_drive_usuario():
 def desconectar_drive_usuario():
     st.session_state["drive_token_info"] = None
     st.session_state["drive_oauth_state"] = None
+    st.session_state["drive_code_verifier"] = None
     limpar_query_params()
 
 
