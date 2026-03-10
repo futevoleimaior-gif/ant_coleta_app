@@ -1166,4 +1166,3 @@ with aba2:
                 st.error("Ocorreu um erro ao salvar na Google Sheet e/ou no Google Drive.")
                 st.code(repr(e))
                 
-                
