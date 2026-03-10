@@ -2,10 +2,12 @@ import os
 import io
 import base64
 import re
+import json
 import hashlib
 import unicodedata
 from datetime import datetime
 
+import requests
 import streamlit as st
 import pandas as pd
 import gspread
@@ -13,10 +15,11 @@ import gspread
 from openai import OpenAI
 from PIL import Image
 
+from urllib.parse import urlencode
+
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import Flow
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -77,6 +80,10 @@ SCOPES_DRIVE_OAUTH = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
+GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+GOOGLE_REVOKE_URI = "https://oauth2.googleapis.com/revoke"
+
 
 # =========================================
 # QUERY PARAMS (compatibilidade)
@@ -104,7 +111,6 @@ def limpar_query_params():
 # GOOGLE SHEETS / SERVICE ACCOUNT
 # =========================================
 def obter_credenciais_service_account():
-    # Prioridade: Streamlit Cloud secrets
     try:
         info = dict(st.secrets["gcp_service_account"])
         return ServiceAccountCredentials.from_service_account_info(
@@ -114,7 +120,6 @@ def obter_credenciais_service_account():
     except Exception:
         pass
 
-    # Fallback local
     if os.path.exists(SERVICE_ACCOUNT_FILE):
         return ServiceAccountCredentials.from_service_account_file(
             SERVICE_ACCOUNT_FILE,
@@ -184,43 +189,70 @@ def registrar_log(
 
 
 # =========================================
-# GOOGLE DRIVE (OAuth WEB - sem PKCE)
+# GOOGLE DRIVE (OAuth WEB MANUAL)
 # =========================================
-def obter_client_config_oauth():
-    return {
-        "web": {
-            "client_id": GOOGLE_CLIENT_ID,
-            "project_id": "app-ant",
-            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-            "token_uri": "https://oauth2.googleapis.com/token",
-            "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-            "client_secret": GOOGLE_CLIENT_SECRET,
-            "redirect_uris": [GOOGLE_REDIRECT_URI],
-        }
-    }
-
-
-def criar_flow_oauth_drive(state=None):
-    flow = Flow.from_client_config(
-        client_config=obter_client_config_oauth(),
-        scopes=SCOPES_DRIVE_OAUTH,
-        state=state
-    )
-    flow.redirect_uri = GOOGLE_REDIRECT_URI
-    return flow
+def gerar_state_seguro():
+    base = f"{APP_SECRET_KEY}-{datetime.now().timestamp()}"
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()
 
 
 def gerar_url_autorizacao_drive():
-    flow = criar_flow_oauth_drive()
-
-    authorization_url, state = flow.authorization_url(
-        access_type="offline",
-        include_granted_scopes="true",
-        prompt="consent"
-    )
-
+    state = gerar_state_seguro()
     st.session_state["drive_oauth_state"] = state
-    return authorization_url
+
+    params = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "response_type": "code",
+        "scope": " ".join(SCOPES_DRIVE_OAUTH),
+        "access_type": "offline",
+        "include_granted_scopes": "true",
+        "prompt": "consent",
+        "state": state,
+    }
+
+    return f"{GOOGLE_AUTH_URI}?{urlencode(params)}"
+
+
+def trocar_code_por_token(code):
+    payload = {
+        "code": code,
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "redirect_uri": GOOGLE_REDIRECT_URI,
+        "grant_type": "authorization_code",
+    }
+
+    response = requests.post(GOOGLE_TOKEN_URI, data=payload, timeout=30)
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw_text": response.text}
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Falha ao obter token: {data}")
+
+    return data
+
+
+def renovar_token_google(refresh_token):
+    payload = {
+        "client_id": GOOGLE_CLIENT_ID,
+        "client_secret": GOOGLE_CLIENT_SECRET,
+        "refresh_token": refresh_token,
+        "grant_type": "refresh_token",
+    }
+
+    response = requests.post(GOOGLE_TOKEN_URI, data=payload, timeout=30)
+    try:
+        data = response.json()
+    except Exception:
+        data = {"raw_text": response.text}
+
+    if response.status_code != 200:
+        raise RuntimeError(f"Falha ao renovar token: {data}")
+
+    return data
 
 
 def processar_callback_oauth_drive():
@@ -237,27 +269,21 @@ def processar_callback_oauth_drive():
         return
 
     state_esperado = st.session_state.get("drive_oauth_state")
-
     if state_esperado and state != state_esperado:
         st.error("Falha de segurança no retorno do Google (state inválido).")
         limpar_query_params()
         return
 
     try:
-        flow = criar_flow_oauth_drive(state=state)
-        flow.fetch_token(
-            code=code,
-            client_secret=GOOGLE_CLIENT_SECRET
-        )
+        token_data = trocar_code_por_token(code)
 
-        creds = flow.credentials
         st.session_state["drive_token_info"] = {
-            "token": creds.token,
-            "refresh_token": creds.refresh_token,
-            "token_uri": creds.token_uri,
-            "client_id": creds.client_id,
-            "client_secret": creds.client_secret,
-            "scopes": creds.scopes,
+            "token": token_data.get("access_token"),
+            "refresh_token": token_data.get("refresh_token"),
+            "token_uri": GOOGLE_TOKEN_URI,
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "scopes": SCOPES_DRIVE_OAUTH,
         }
 
         st.session_state["drive_oauth_state"] = None
@@ -276,22 +302,39 @@ def obter_credenciais_drive_usuario():
     if not token_info:
         return None
 
-    creds = UserCredentials.from_authorized_user_info(
-        token_info,
-        SCOPES_DRIVE_OAUTH
+    if not token_info.get("token"):
+        return None
+
+    creds = UserCredentials(
+        token=token_info.get("token"),
+        refresh_token=token_info.get("refresh_token"),
+        token_uri=token_info.get("token_uri"),
+        client_id=token_info.get("client_id"),
+        client_secret=token_info.get("client_secret"),
+        scopes=token_info.get("scopes"),
     )
 
     if creds.expired and creds.refresh_token:
         try:
-            creds.refresh(Request())
+            novo_token = renovar_token_google(creds.refresh_token)
+
             st.session_state["drive_token_info"] = {
-                "token": creds.token,
-                "refresh_token": creds.refresh_token,
-                "token_uri": creds.token_uri,
-                "client_id": creds.client_id,
-                "client_secret": creds.client_secret,
-                "scopes": creds.scopes,
+                "token": novo_token.get("access_token"),
+                "refresh_token": token_info.get("refresh_token"),
+                "token_uri": GOOGLE_TOKEN_URI,
+                "client_id": GOOGLE_CLIENT_ID,
+                "client_secret": GOOGLE_CLIENT_SECRET,
+                "scopes": SCOPES_DRIVE_OAUTH,
             }
+
+            creds = UserCredentials(
+                token=novo_token.get("access_token"),
+                refresh_token=token_info.get("refresh_token"),
+                token_uri=GOOGLE_TOKEN_URI,
+                client_id=GOOGLE_CLIENT_ID,
+                client_secret=GOOGLE_CLIENT_SECRET,
+                scopes=SCOPES_DRIVE_OAUTH,
+            )
         except Exception:
             st.session_state["drive_token_info"] = None
             return None
@@ -318,6 +361,20 @@ def conectar_drive_usuario():
 
 
 def desconectar_drive_usuario():
+    token_info = st.session_state.get("drive_token_info")
+    access_token = token_info.get("token") if token_info else None
+
+    if access_token:
+        try:
+            requests.post(
+                GOOGLE_REVOKE_URI,
+                params={"token": access_token},
+                headers={"content-type": "application/x-www-form-urlencoded"},
+                timeout=15
+            )
+        except Exception:
+            pass
+
     st.session_state["drive_token_info"] = None
     st.session_state["drive_oauth_state"] = None
     limpar_query_params()
