@@ -16,31 +16,54 @@ from PIL import Image
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google.oauth2.credentials import Credentials as UserCredentials
 from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
+from google_auth_oauthlib.flow import Flow
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 st.set_page_config(page_title="APP ANT", page_icon="🏆", layout="centered")
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+# =========================================
+# HELPERS DE SECRETS
+# =========================================
+def obter_secret_obrigatorio(chave):
+    try:
+        return st.secrets[chave]
+    except Exception:
+        st.error(f"Secret obrigatório ausente: {chave}")
+        st.stop()
+
+
+OPENAI_API_KEY = obter_secret_obrigatorio("OPENAI_API_KEY")
+GOOGLE_SHEET_ID_SUL = obter_secret_obrigatorio("GOOGLE_SHEET_ID_SUL")
+GOOGLE_SHEET_ID_NORTE = obter_secret_obrigatorio("GOOGLE_SHEET_ID_NORTE")
+GOOGLE_SHEET_ID_LOG = obter_secret_obrigatorio("GOOGLE_SHEET_ID_LOG")
+
+FLYERS_MARCO_FAZER = obter_secret_obrigatorio("FLYERS_MARCO_FAZER")
+FLYERS_ABRIL_FAZER = obter_secret_obrigatorio("FLYERS_ABRIL_FAZER")
+
+GOOGLE_CLIENT_ID = obter_secret_obrigatorio("GOOGLE_CLIENT_ID")
+GOOGLE_CLIENT_SECRET = obter_secret_obrigatorio("GOOGLE_CLIENT_SECRET")
+GOOGLE_REDIRECT_URI = obter_secret_obrigatorio("GOOGLE_REDIRECT_URI")
+APP_SECRET_KEY = obter_secret_obrigatorio("APP_SECRET_KEY")
+
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 if "ultimo_salvamento_fingerprint" not in st.session_state:
     st.session_state["ultimo_salvamento_fingerprint"] = None
 
+if "drive_token_info" not in st.session_state:
+    st.session_state["drive_token_info"] = None
+
+if "drive_oauth_state" not in st.session_state:
+    st.session_state["drive_oauth_state"] = None
+
+
 # =========================================
 # CONFIG GOOGLE
 # =========================================
-GOOGLE_SHEET_ID_SUL = st.secrets["GOOGLE_SHEET_ID_SUL"]
-GOOGLE_SHEET_ID_NORTE = st.secrets["GOOGLE_SHEET_ID_NORTE"]
-GOOGLE_SHEET_ID_LOG = st.secrets["GOOGLE_SHEET_ID_LOG"]
-
-FLYERS_MARCO_FAZER = st.secrets["FLYERS_MARCO_FAZER"]
-FLYERS_ABRIL_FAZER = st.secrets["FLYERS_ABRIL_FAZER"]
-
 SERVICE_ACCOUNT_FILE = "credentials/google_service_account.json"
-OAUTH_CLIENT_FILE = "credentials/google_oauth_client.json"
-OAUTH_TOKEN_FILE = "credentials/google_oauth_token.json"
 
 SCOPES_SHEETS = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -51,13 +74,54 @@ SCOPES_DRIVE_OAUTH = [
     "https://www.googleapis.com/auth/drive",
 ]
 
+
 # =========================================
-# GOOGLE SHEETS
+# QUERY PARAMS (compatibilidade)
+# =========================================
+def obter_query_param(nome):
+    try:
+        valor = st.query_params.get(nome)
+        if isinstance(valor, list):
+            return valor[0] if valor else None
+        return valor
+    except Exception:
+        params = st.experimental_get_query_params()
+        valores = params.get(nome, [])
+        return valores[0] if valores else None
+
+
+def limpar_query_params():
+    try:
+        st.query_params.clear()
+    except Exception:
+        st.experimental_set_query_params()
+
+
+# =========================================
+# GOOGLE SHEETS / SERVICE ACCOUNT
 # =========================================
 def obter_credenciais_service_account():
-    return ServiceAccountCredentials.from_service_account_file(
-        SERVICE_ACCOUNT_FILE,
-        scopes=SCOPES_SHEETS
+    # 1) Prioridade para secrets do Streamlit Cloud
+    try:
+        info = dict(st.secrets["gcp_service_account"])
+        return ServiceAccountCredentials.from_service_account_info(
+            info,
+            scopes=SCOPES_SHEETS
+        )
+    except Exception:
+        pass
+
+    # 2) Fallback para ambiente local
+    if os.path.exists(SERVICE_ACCOUNT_FILE):
+        return ServiceAccountCredentials.from_service_account_file(
+            SERVICE_ACCOUNT_FILE,
+            scopes=SCOPES_SHEETS
+        )
+
+    raise RuntimeError(
+        "Credenciais da service account não encontradas. "
+        "No Streamlit Cloud, adicione [gcp_service_account] nos secrets. "
+        "No ambiente local, mantenha o arquivo credentials/google_service_account.json."
     )
 
 
@@ -117,49 +181,137 @@ def registrar_log(
 
 
 # =========================================
-# GOOGLE DRIVE (OAuth do usuário)
+# GOOGLE DRIVE (OAuth WEB)
 # =========================================
-def carregar_credenciais_drive_oauth():
-    creds = None
-
-    if os.path.exists(OAUTH_TOKEN_FILE):
-        creds = UserCredentials.from_authorized_user_file(
-            OAUTH_TOKEN_FILE,
-            SCOPES_DRIVE_OAUTH
-        )
-
-    if creds and creds.valid:
-        return creds
-
-    if creds and creds.expired and creds.refresh_token:
-        creds.refresh(Request())
-        with open(OAUTH_TOKEN_FILE, "w", encoding="utf-8") as token_file:
-            token_file.write(creds.to_json())
-        return creds
-
-    return None
+def obter_client_config_oauth():
+    return {
+        "web": {
+            "client_id": GOOGLE_CLIENT_ID,
+            "client_secret": GOOGLE_CLIENT_SECRET,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": [GOOGLE_REDIRECT_URI],
+        }
+    }
 
 
-def autenticar_drive_oauth():
-    flow = InstalledAppFlow.from_client_secrets_file(
-        OAUTH_CLIENT_FILE,
+def criar_flow_oauth_drive(state=None):
+    flow = Flow.from_client_config(
+        client_config=obter_client_config_oauth(),
+        scopes=SCOPES_DRIVE_OAUTH,
+        state=state
+    )
+    flow.redirect_uri = GOOGLE_REDIRECT_URI
+    return flow
+
+
+def gerar_url_autorizacao_drive():
+    flow = criar_flow_oauth_drive()
+
+    authorization_url, state = flow.authorization_url(
+        access_type="offline",
+        include_granted_scopes="true",
+        prompt="consent"
+    )
+
+    st.session_state["drive_oauth_state"] = state
+    return authorization_url
+
+
+def processar_callback_oauth_drive():
+    code = obter_query_param("code")
+    state = obter_query_param("state")
+    error = obter_query_param("error")
+
+    if error:
+        st.error(f"Autorização do Google cancelada ou negada: {error}")
+        limpar_query_params()
+        return
+
+    if not code:
+        return
+
+    state_esperado = st.session_state.get("drive_oauth_state")
+    if state_esperado and state != state_esperado:
+        st.error("Falha de segurança no retorno do Google (state inválido).")
+        limpar_query_params()
+        return
+
+    try:
+        flow = criar_flow_oauth_drive(state=state)
+        flow.fetch_token(code=code)
+
+        creds = flow.credentials
+        st.session_state["drive_token_info"] = {
+            "token": creds.token,
+            "refresh_token": creds.refresh_token,
+            "token_uri": creds.token_uri,
+            "client_id": creds.client_id,
+            "client_secret": creds.client_secret,
+            "scopes": creds.scopes,
+        }
+
+        st.session_state["drive_oauth_state"] = None
+        limpar_query_params()
+        st.success("Google Drive conectado com sucesso.")
+        st.rerun()
+
+    except Exception as e:
+        st.error("Não foi possível concluir a autenticação do Google Drive.")
+        st.code(repr(e))
+        limpar_query_params()
+
+
+def obter_credenciais_drive_usuario():
+    token_info = st.session_state.get("drive_token_info")
+    if not token_info:
+        return None
+
+    creds = UserCredentials.from_authorized_user_info(
+        token_info,
         SCOPES_DRIVE_OAUTH
     )
-    creds = flow.run_local_server(port=0)
 
-    with open(OAUTH_TOKEN_FILE, "w", encoding="utf-8") as token_file:
-        token_file.write(creds.to_json())
+    if creds.expired and creds.refresh_token:
+        try:
+            creds.refresh(Request())
+            st.session_state["drive_token_info"] = {
+                "token": creds.token,
+                "refresh_token": creds.refresh_token,
+                "token_uri": creds.token_uri,
+                "client_id": creds.client_id,
+                "client_secret": creds.client_secret,
+                "scopes": creds.scopes,
+            }
+        except Exception:
+            st.session_state["drive_token_info"] = None
+            return None
+
+    if not creds.valid:
+        return None
 
     return creds
 
 
-def conectar_drive_usuario():
-    creds = carregar_credenciais_drive_oauth()
+def drive_conectado():
+    creds = obter_credenciais_drive_usuario()
+    return creds is not None
 
+
+def conectar_drive_usuario():
+    creds = obter_credenciais_drive_usuario()
     if not creds:
-        creds = autenticar_drive_oauth()
+        raise RuntimeError(
+            "Google Drive não conectado. Clique em 'Conectar Google Drive' antes de salvar."
+        )
 
     return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+
+def desconectar_drive_usuario():
+    st.session_state["drive_token_info"] = None
+    st.session_state["drive_oauth_state"] = None
+    limpar_query_params()
 
 
 def obter_id_pasta_flyers(mes):
@@ -625,6 +777,12 @@ Contato: {contato}"""
 
 
 # =========================================
+# PROCESSA CALLBACK OAUTH ANTES DA UI
+# =========================================
+processar_callback_oauth_drive()
+
+
+# =========================================
 # UI
 # =========================================
 st.title("🏆 APP ANT")
@@ -797,6 +955,20 @@ with aba2:
 
     st.divider()
 
+    st.markdown("### 3.1 Conexão com Google Drive")
+
+    if drive_conectado():
+        st.success("Google Drive conectado.")
+        if st.button("Desconectar Google Drive", key="btn_desconectar_drive"):
+            desconectar_drive_usuario()
+            st.rerun()
+    else:
+        st.warning("Google Drive ainda não conectado.")
+        url_autorizacao = gerar_url_autorizacao_drive()
+        st.link_button("Conectar Google Drive", url_autorizacao)
+
+    st.divider()
+
     st.markdown("### 4. Pré-visualização da linha da macro")
 
     campos = extrair_campos_confirmados(texto_confirmado)
@@ -882,6 +1054,8 @@ with aba2:
         erros.append("Não foi possível identificar a data inicial.")
     if not data_final:
         erros.append("Não foi possível identificar a data final.")
+    if not drive_conectado():
+        erros.append("Conecte o Google Drive antes de salvar.")
 
     salvamento_atual_fingerprint = gerar_fingerprint_salvamento(
         texto_confirmado=texto_confirmado,
@@ -982,3 +1156,4 @@ with aba2:
 
                 st.error("Ocorreu um erro ao salvar na Google Sheet e/ou no Google Drive.")
                 st.code(repr(e))
+                
