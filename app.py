@@ -19,7 +19,6 @@ from urllib.parse import urlencode
 
 from google.oauth2.service_account import Credentials as ServiceAccountCredentials
 from google.oauth2.credentials import Credentials as UserCredentials
-from google.auth.transport.requests import Request
 
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -430,6 +429,24 @@ def remover_acentos(texto):
     )
 
 
+def capitalizar_texto_padrao(texto):
+    texto = limpar_espacos(texto)
+    if not texto:
+        return ""
+
+    partes = re.split(r"(\s+|/|-)", texto)
+    novas = []
+
+    for parte in partes:
+        if not parte or re.fullmatch(r"(\s+|/|-)", parte):
+            novas.append(parte)
+        else:
+            parte = parte.lower()
+            novas.append(parte[:1].upper() + parte[1:])
+
+    return "".join(novas)
+
+
 def imagem_para_data_url(uploaded_file):
     bytes_imagem = uploaded_file.getvalue()
     base64_image = base64.b64encode(bytes_imagem).decode("utf-8")
@@ -439,6 +456,8 @@ def imagem_para_data_url(uploaded_file):
 
 def normalizar_ano(ano_texto):
     ano_texto = str(ano_texto).strip()
+    if not ano_texto:
+        return ""
     if len(ano_texto) == 2:
         return f"20{ano_texto}"
     return ano_texto
@@ -446,14 +465,15 @@ def normalizar_ano(ano_texto):
 
 def ano_4_para_2(ano_texto):
     ano_texto = normalizar_ano(ano_texto)
-    return ano_texto[-2:]
+    return ano_texto[-2:] if ano_texto else ""
 
 
 def gerar_nome_arquivo(uf, data_evento, cidade):
     if not uf or not data_evento or not cidade:
         return ""
     dias = extrair_dias_para_nome(data_evento)
-    return f"{uf} {dias} {cidade.strip()}"
+    cidade_formatada = capitalizar_texto_padrao(cidade)
+    return f"{uf} {dias} {cidade_formatada.strip()}"
 
 
 def gerar_nome_flyer(uploaded_file, nome_base):
@@ -527,12 +547,14 @@ def normalizar_cidade_uf(cidade_uf):
     s = s.replace(" - ", "/")
     s = s.replace(" – ", "/")
     s = s.replace("\\", "/")
+    s = s.replace(", ", "/")
+    s = s.replace(",", "/")
 
     if "/" not in s:
-        return s
+        return capitalizar_texto_padrao(s)
 
     partes = s.rsplit("/", 1)
-    cidade = limpar_espacos(partes[0])
+    cidade = capitalizar_texto_padrao(limpar_espacos(partes[0]))
     uf = limpar_espacos(partes[1]).upper()
 
     if len(uf) > 2:
@@ -568,8 +590,7 @@ def normalizar_cidade_uf(cidade_uf):
                 "TO": "Tocantins",
             }.items()
         }
-        uf_normalizada = mapa_reverso.get(remover_acentos(uf).lower(), uf[:2].upper())
-        uf = uf_normalizada
+        uf = mapa_reverso.get(remover_acentos(uf).lower(), uf[:2].upper())
 
     return f"{cidade}/{uf}"
 
@@ -591,7 +612,7 @@ def separar_cidade_uf(cidade_uf):
 # DATAS
 # =========================================
 def extrair_partes_data(data_texto):
-    s = limpar_espacos(data_texto)
+    s = limpar_espacos(str(data_texto).replace("'", ""))
     padrao = r"(\d{1,2})(?:/(\d{1,2}))?(?:/(\d{2,4}))?"
     return re.findall(padrao, s)
 
@@ -600,6 +621,8 @@ def reconstruir_datas_completas(data_texto):
     partes = extrair_partes_data(data_texto)
     if not partes:
         return []
+
+    ano_atual = str(datetime.now().year)
 
     registros = []
     for dia, mes, ano in partes:
@@ -623,6 +646,10 @@ def reconstruir_datas_completas(data_texto):
         else:
             registros[i]["mes"] = mes_corrente
 
+    for r in registros:
+        if not r["ano"]:
+            r["ano"] = ano_atual
+
     datas = []
     for r in registros:
         if r["dia"] and r["mes"] and r["ano"]:
@@ -639,7 +666,7 @@ def extrair_data_inicial_final(data_texto):
 
 
 def normalizar_data_visual_ant(data_texto):
-    s = limpar_espacos(data_texto)
+    s = limpar_espacos(str(data_texto))
     if not s:
         return ""
 
@@ -664,6 +691,7 @@ def normalizar_data_visual_ant(data_texto):
 
         return f"'{', '.join(dias[:-1])} e {dias[-1]}/{mes}/{ano2}"
 
+    blocos = []
     grupos = []
     grupo_atual = {"mes": None, "ano2": None, "dias": []}
 
@@ -681,7 +709,6 @@ def normalizar_data_visual_ant(data_texto):
     if grupo_atual["dias"]:
         grupos.append(grupo_atual)
 
-    blocos = []
     for i, g in enumerate(grupos):
         dias_txt = ", ".join(g["dias"])
         if i == len(grupos) - 1:
@@ -828,11 +855,13 @@ def montar_mensagem(texto):
     cidade_uf = normalizar_cidade_uf(campos["cidade_uf"])
     categorias = padronizar_categorias(campos["categorias"])
     contato = normalizar_contato(campos["contato"])
+    torneio = capitalizar_texto_padrao(campos["torneio"])
+    local = capitalizar_texto_padrao(campos["local"])
 
     data_final_msg = data_visual if data_visual else "não encontrado"
-    torneio_final = campos["torneio"] if campos["torneio"] else "não encontrado"
+    torneio_final = torneio if torneio else "não encontrado"
     cidade_final = cidade_uf if cidade_uf else "não encontrado"
-    local_final = campos["local"] if campos["local"] else "não encontrado"
+    local_final = local if local else "não encontrado"
 
     return f"""Data: {data_final_msg}
 Torneio: {torneio_final}
@@ -892,6 +921,8 @@ with aba1:
 
             st.write("Analisando imagem...")
 
+            ano_corrente_2 = str(datetime.now().year)[-2:]
+
             prompt = f"""
 Você está operando no modo fixo: 1 print = 1 torneio.
 
@@ -917,7 +948,15 @@ Regras obrigatórias:
 - Se um campo não for encontrado, escreva: não encontrado.
 - Não invente informações.
 - Não una dois torneios.
-- Mantenha nomes próprios como estão.
+- Padronize a data no formato ANT. Exemplos:
+  10/04/{ano_corrente_2}
+  10 e 11/04/{ano_corrente_2}
+  10, 11 e 12/04/{ano_corrente_2}
+  30, 31/03 e 01/04/{ano_corrente_2}
+- Se o ano não estiver informado, assuma o ano corrente ({ano_corrente_2}).
+- Cidade/ES deve sempre estar no formato Cidade/UF.
+- No nome do torneio, cidade e local, use capitalização padronizada:
+  primeira letra de cada palavra maiúscula e demais minúsculas.
 
 Texto complementar do usuário:
 {informacao_complementar if informacao_complementar.strip() else "nenhum"}
@@ -1040,9 +1079,9 @@ with aba2:
     campos = extrair_campos_confirmados(texto_confirmado)
 
     data_evento_visual = normalizar_data_visual_ant(campos["data"])
-    torneio = campos["torneio"]
+    torneio = capitalizar_texto_padrao(campos["torneio"])
     cidade_uf = normalizar_cidade_uf(campos["cidade_uf"])
-    local_evento = campos["local"]
+    local_evento = capitalizar_texto_padrao(campos["local"])
     categorias = padronizar_categorias(campos["categorias"])
     contato = normalizar_contato(campos["contato"])
 
