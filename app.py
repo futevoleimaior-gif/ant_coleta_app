@@ -480,8 +480,18 @@ def desconectar_drive_usuario():
 
 def obter_id_pasta_flyers(mes):
     mapa = {
-        "3. Março": FLYERS_MARCO_FAZER,
-        "4. Abril": FLYERS_ABRIL_FAZER,
+        "1. Janeiro": st.secrets["FLYERS_JANEIRO_FAZER"],
+        "2. Fevereiro": st.secrets["FLYERS_FEVEREIRO_FAZER"],
+        "3. Março": st.secrets["FLYERS_MARCO_FAZER"],
+        "4. Abril": st.secrets["FLYERS_ABRIL_FAZER"],
+        "5. Maio": st.secrets["FLYERS_MAIO_FAZER"],
+        "6. Junho": st.secrets["FLYERS_JUNHO_FAZER"],
+        "7. Julho": st.secrets["FLYERS_JULHO_FAZER"],
+        "8. Agosto": st.secrets["FLYERS_AGOSTO_FAZER"],
+        "9. Setembro": st.secrets["FLYERS_SETEMBRO_FAZER"],
+        "10. Outubro": st.secrets["FLYERS_OUTUBRO_FAZER"],
+        "11. Novembro": st.secrets["FLYERS_NOVEMBRO_FAZER"],
+        "12. Dezembro": st.secrets["FLYERS_DEZEMBRO_FAZER"],
     }
     return mapa.get(mes, "")
 
@@ -1361,4 +1371,3 @@ with aba2:
 
                 st.error("Ocorreu um erro ao salvar na Google Sheet e/ou no Google Drive.")
                 st.code(repr(e))
-                
