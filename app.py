@@ -45,8 +45,18 @@ GOOGLE_SHEET_ID_SUL = obter_secret_obrigatorio("GOOGLE_SHEET_ID_SUL")
 GOOGLE_SHEET_ID_NORTE = obter_secret_obrigatorio("GOOGLE_SHEET_ID_NORTE")
 GOOGLE_SHEET_ID_LOG = obter_secret_obrigatorio("GOOGLE_SHEET_ID_LOG")
 
-FLYERS_MARCO_FAZER = obter_secret_obrigatorio("FLYERS_MARCO_FAZER")
-FLYERS_ABRIL_FAZER = obter_secret_obrigatorio("FLYERS_ABRIL_FAZER")
+FLYERS_JANEIRO_FAZER = st.secrets.get("FLYERS_JANEIRO_FAZER", "")
+FLYERS_FEVEREIRO_FAZER = st.secrets.get("FLYERS_FEVEREIRO_FAZER", "")
+FLYERS_MARCO_FAZER = st.secrets.get("FLYERS_MARCO_FAZER", "")
+FLYERS_ABRIL_FAZER = st.secrets.get("FLYERS_ABRIL_FAZER", "")
+FLYERS_MAIO_FAZER = st.secrets.get("FLYERS_MAIO_FAZER", "")
+FLYERS_JUNHO_FAZER = st.secrets.get("FLYERS_JUNHO_FAZER", "")
+FLYERS_JULHO_FAZER = st.secrets.get("FLYERS_JULHO_FAZER", "")
+FLYERS_AGOSTO_FAZER = st.secrets.get("FLYERS_AGOSTO_FAZER", "")
+FLYERS_SETEMBRO_FAZER = st.secrets.get("FLYERS_SETEMBRO_FAZER", "")
+FLYERS_OUTUBRO_FAZER = st.secrets.get("FLYERS_OUTUBRO_FAZER", "")
+FLYERS_NOVEMBRO_FAZER = st.secrets.get("FLYERS_NOVEMBRO_FAZER", "")
+FLYERS_DEZEMBRO_FAZER = st.secrets.get("FLYERS_DEZEMBRO_FAZER", "")
 
 GOOGLE_CLIENT_ID = obter_secret_obrigatorio("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = obter_secret_obrigatorio("GOOGLE_CLIENT_SECRET")
@@ -480,18 +490,18 @@ def desconectar_drive_usuario():
 
 def obter_id_pasta_flyers(mes):
     mapa = {
-        "1. Janeiro": st.secrets["FLYERS_JANEIRO_FAZER"],
-        "2. Fevereiro": st.secrets["FLYERS_FEVEREIRO_FAZER"],
-        "3. Março": st.secrets["FLYERS_MARCO_FAZER"],
-        "4. Abril": st.secrets["FLYERS_ABRIL_FAZER"],
-        "5. Maio": st.secrets["FLYERS_MAIO_FAZER"],
-        "6. Junho": st.secrets["FLYERS_JUNHO_FAZER"],
-        "7. Julho": st.secrets["FLYERS_JULHO_FAZER"],
-        "8. Agosto": st.secrets["FLYERS_AGOSTO_FAZER"],
-        "9. Setembro": st.secrets["FLYERS_SETEMBRO_FAZER"],
-        "10. Outubro": st.secrets["FLYERS_OUTUBRO_FAZER"],
-        "11. Novembro": st.secrets["FLYERS_NOVEMBRO_FAZER"],
-        "12. Dezembro": st.secrets["FLYERS_DEZEMBRO_FAZER"],
+        "1. Janeiro": FLYERS_JANEIRO_FAZER,
+        "2. Fevereiro": FLYERS_FEVEREIRO_FAZER,
+        "3. Março": FLYERS_MARCO_FAZER,
+        "4. Abril": FLYERS_ABRIL_FAZER,
+        "5. Maio": FLYERS_MAIO_FAZER,
+        "6. Junho": FLYERS_JUNHO_FAZER,
+        "7. Julho": FLYERS_JULHO_FAZER,
+        "8. Agosto": FLYERS_AGOSTO_FAZER,
+        "9. Setembro": FLYERS_SETEMBRO_FAZER,
+        "10. Outubro": FLYERS_OUTUBRO_FAZER,
+        "11. Novembro": FLYERS_NOVEMBRO_FAZER,
+        "12. Dezembro": FLYERS_DEZEMBRO_FAZER,
     }
     return mapa.get(mes, "")
 
@@ -704,9 +714,28 @@ def normalizar_cidade_uf(cidade_uf):
     return f"{cidade}/{uf}"
 
 
-def separar_cidade_uf(cidade_uf):
-    cidade_uf = normalizar_cidade_uf(cidade_uf)
+def normalizar_cidade_uf_tela2(cidade_uf):
+    s = limpar_espacos(cidade_uf)
+    if not s:
+        return ""
 
+    s = s.replace(" - ", "/")
+    s = s.replace(" – ", "/")
+    s = s.replace("\\", "/")
+    s = s.replace(", ", "/")
+    s = s.replace(",", "/")
+
+    if "/" not in s:
+        return s
+
+    partes = s.rsplit("/", 1)
+    cidade = limpar_espacos(partes[0])
+    uf = limpar_espacos(partes[1]).upper()
+
+    return f"{cidade}/{uf}"
+
+
+def separar_cidade_uf(cidade_uf):
     if "/" not in cidade_uf:
         return cidade_uf.strip(), "", ""
 
@@ -1190,7 +1219,7 @@ with aba2:
 
     data_evento_visual = normalizar_data_visual_ant(campos["data"])
     torneio = campos["torneio"]
-    cidade_uf = normalizar_cidade_uf(campos["cidade_uf"])
+    cidade_uf = normalizar_cidade_uf_tela2(campos["cidade_uf"])
     local_evento = campos["local"]
     categorias = padronizar_categorias(campos["categorias"])
     contato = normalizar_contato(campos["contato"])
@@ -1371,3 +1400,4 @@ with aba2:
 
                 st.error("Ocorreu um erro ao salvar na Google Sheet e/ou no Google Drive.")
                 st.code(repr(e))
+                
