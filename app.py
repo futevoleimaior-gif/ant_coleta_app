@@ -1179,9 +1179,9 @@ with aba2:
     campos = extrair_campos_confirmados(texto_confirmado)
 
     data_evento_visual = normalizar_data_visual_ant(campos["data"])
-    torneio = capitalizar_texto_padrao(campos["torneio"])
+    torneio = campos["torneio"]
     cidade_uf = normalizar_cidade_uf(campos["cidade_uf"])
-    local_evento = capitalizar_texto_padrao(campos["local"])
+    local_evento = campos["local"]
     categorias = padronizar_categorias(campos["categorias"])
     contato = normalizar_contato(campos["contato"])
 
