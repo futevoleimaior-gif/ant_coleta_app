@@ -548,22 +548,57 @@ def remover_acentos(texto):
     )
 
 
-def capitalizar_texto_padrao(texto):
+def _capitalizar_palavra_com_apostrofo(palavra):
+    partes = palavra.split("'")
+    partes_tratadas = []
+
+    for parte in partes:
+        if not parte:
+            partes_tratadas.append(parte)
+        else:
+            parte_lower = parte.lower()
+            partes_tratadas.append(parte_lower[:1].upper() + parte_lower[1:])
+
+    return "'".join(partes_tratadas)
+
+
+def capitalizar_texto_inteligente(texto):
     texto = limpar_espacos(texto)
     if not texto:
         return ""
 
-    partes = re.split(r"(\s+|/|-)", texto)
-    novas = []
+    minusculas = {
+        "de", "da", "do", "das", "dos",
+        "e", "em", "na", "no", "nas", "nos"
+    }
 
-    for parte in partes:
-        if not parte or re.fullmatch(r"(\s+|/|-)", parte):
-            novas.append(parte)
+    separadores = re.split(r"(\s+|/|-)", texto)
+    resultado = []
+    primeira_palavra_real = True
+
+    for parte in separadores:
+        if not parte:
+            resultado.append(parte)
+            continue
+
+        if re.fullmatch(r"(\s+|/|-)", parte):
+            resultado.append(parte)
+            continue
+
+        parte_limpa = parte.strip()
+        parte_lower = parte_limpa.lower()
+
+        if not primeira_palavra_real and parte_lower in minusculas:
+            resultado.append(parte_lower)
         else:
-            parte = parte.lower()
-            novas.append(parte[:1].upper() + parte[1:])
+            if re.search(r"[A-Z]{2,}", parte):
+                resultado.append(parte)
+            else:
+                resultado.append(_capitalizar_palavra_com_apostrofo(parte))
 
-    return "".join(novas)
+        primeira_palavra_real = False
+
+    return "".join(resultado)
 
 
 def imagem_para_data_url(uploaded_file):
@@ -591,7 +626,7 @@ def gerar_nome_arquivo(uf, data_evento, cidade):
     if not uf or not data_evento or not cidade:
         return ""
     dias = extrair_dias_para_nome(data_evento)
-    cidade_formatada = capitalizar_texto_padrao(cidade)
+    cidade_formatada = capitalizar_texto_inteligente(cidade)
     return f"{uf} {dias} {cidade_formatada.strip()}"
 
 
@@ -670,10 +705,10 @@ def normalizar_cidade_uf(cidade_uf):
     s = s.replace(",", "/")
 
     if "/" not in s:
-        return capitalizar_texto_padrao(s)
+        return capitalizar_texto_inteligente(s)
 
     partes = s.rsplit("/", 1)
-    cidade = capitalizar_texto_padrao(limpar_espacos(partes[0]))
+    cidade = capitalizar_texto_inteligente(limpar_espacos(partes[0]))
     uf = limpar_espacos(partes[1]).upper()
 
     if len(uf) > 2:
@@ -905,9 +940,7 @@ def normalizar_categoria_individual(cat):
     if not cat:
         return ""
 
-    cat = cat.lower()
     cat = aplicar_maiusculas_niveis(cat)
-
     return cat
 
 
@@ -917,11 +950,10 @@ def padronizar_categorias(texto):
     if not texto:
         return "não encontrado"
 
-    texto = re.sub(r"\s+\+\s+", ", ", texto)
+    texto = texto.replace(" + ", "+")
     texto = re.sub(r"\s*/\s*", ", ", texto)
     texto = re.sub(r"\s*;\s*", ", ", texto)
     texto = re.sub(r"\s+[–-]\s+", ", ", texto)
-    texto = re.sub(r"\s+e\s+", ", ", texto, flags=re.IGNORECASE)
 
     partes = [p.strip() for p in texto.split(",") if p.strip()]
 
@@ -932,8 +964,6 @@ def padronizar_categorias(texto):
 
     if not partes:
         return "não encontrado"
-
-    partes[0] = partes[0][:1].upper() + partes[0][1:] if partes[0] else partes[0]
 
     if len(partes) == 1:
         return partes[0]
@@ -993,8 +1023,8 @@ def montar_mensagem(texto):
     cidade_uf = normalizar_cidade_uf(campos["cidade_uf"])
     categorias = padronizar_categorias(campos["categorias"])
     contato = normalizar_contato(campos["contato"])
-    torneio = capitalizar_texto_padrao(campos["torneio"])
-    local = capitalizar_texto_padrao(campos["local"])
+    torneio = capitalizar_texto_inteligente(campos["torneio"])
+    local = capitalizar_texto_inteligente(campos["local"])
 
     data_final_msg = data_visual if data_visual else "não encontrado"
     torneio_final = torneio if torneio else "não encontrado"
@@ -1094,8 +1124,9 @@ Regras obrigatórias:
   30, 31/03 e 01/04/{ano_corrente_2}
 - Se o ano não estiver informado, assuma o ano corrente ({ano_corrente_2}).
 - Cidade/ES deve sempre estar no formato Cidade/UF.
-- No nome do torneio, cidade e local, use capitalização padronizada:
-  primeira letra de cada palavra maiúscula e demais minúsculas.
+- Preserve categorias compostas com +, por exemplo B+C e A+B.
+- No nome do torneio, cidade e local, use capitalização inteligente:
+  mantenha minúsculas internas em palavras como de, da, do, dos, das, e, em, na, no, nas e nos.
 
 Texto complementar do usuário:
 {informacao_complementar if informacao_complementar.strip() else "nenhum"}
@@ -1221,7 +1252,7 @@ with aba2:
     torneio = campos["torneio"]
     cidade_uf = normalizar_cidade_uf_tela2(campos["cidade_uf"])
     local_evento = campos["local"]
-    categorias = padronizar_categorias(campos["categorias"])
+    categorias = campos["categorias"]
     contato = normalizar_contato(campos["contato"])
 
     cidade, uf, estado_extenso = separar_cidade_uf(cidade_uf)
