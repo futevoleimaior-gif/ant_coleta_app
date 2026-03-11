@@ -64,6 +64,9 @@ if "drive_token_info" not in st.session_state:
 if "drive_oauth_state" not in st.session_state:
     st.session_state["drive_oauth_state"] = None
 
+if "drive_token_carregado_persistencia" not in st.session_state:
+    st.session_state["drive_token_carregado_persistencia"] = False
+
 
 # =========================================
 # CONFIG GOOGLE
@@ -82,6 +85,9 @@ SCOPES_DRIVE_OAUTH = [
 GOOGLE_AUTH_URI = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URI = "https://oauth2.googleapis.com/revoke"
+
+NOME_ABA_CONFIG = "CONFIG_APP"
+CHAVE_TOKEN_DRIVE = "DRIVE_TOKEN_INFO"
 
 
 # =========================================
@@ -147,6 +153,75 @@ def obter_planilha_por_agenda(client_gs, agenda):
 
 def obter_planilha_log(client_gs):
     return client_gs.open_by_key(GOOGLE_SHEET_ID_LOG)
+
+
+def obter_aba_config(client_gs):
+    planilha_log = obter_planilha_log(client_gs)
+
+    try:
+        aba = planilha_log.worksheet(NOME_ABA_CONFIG)
+    except Exception:
+        aba = planilha_log.add_worksheet(title=NOME_ABA_CONFIG, rows=50, cols=2)
+        aba.update("A1:B1", [["chave", "valor"]])
+
+    valores = aba.get("A1:B2")
+    if not valores:
+        aba.update("A1:B1", [["chave", "valor"]])
+    else:
+        primeira_linha = valores[0]
+        if len(primeira_linha) < 2 or primeira_linha[0] != "chave" or primeira_linha[1] != "valor":
+            aba.update("A1:B1", [["chave", "valor"]])
+
+    return aba
+
+
+def buscar_linha_por_chave(aba, chave):
+    registros = aba.get_all_values()
+    for idx, linha in enumerate(registros[1:], start=2):
+        if linha and len(linha) >= 1 and linha[0] == chave:
+            return idx
+    return None
+
+
+def carregar_token_drive_persistido():
+    try:
+        client_gs = conectar_gsheet()
+        aba = obter_aba_config(client_gs)
+        registros = aba.get_all_values()
+
+        for linha in registros[1:]:
+            if len(linha) >= 2 and linha[0] == CHAVE_TOKEN_DRIVE and linha[1].strip():
+                return json.loads(linha[1])
+
+    except Exception:
+        return None
+
+    return None
+
+
+def salvar_token_drive_persistido(token_info):
+    client_gs = conectar_gsheet()
+    aba = obter_aba_config(client_gs)
+
+    valor_json = json.dumps(token_info, ensure_ascii=False)
+    linha_existente = buscar_linha_por_chave(aba, CHAVE_TOKEN_DRIVE)
+
+    if linha_existente:
+        aba.update(f"A{linha_existente}:B{linha_existente}", [[CHAVE_TOKEN_DRIVE, valor_json]])
+    else:
+        aba.append_row([CHAVE_TOKEN_DRIVE, valor_json], value_input_option="RAW")
+
+
+def limpar_token_drive_persistido():
+    try:
+        client_gs = conectar_gsheet()
+        aba = obter_aba_config(client_gs)
+        linha_existente = buscar_linha_por_chave(aba, CHAVE_TOKEN_DRIVE)
+
+        if linha_existente:
+            aba.update(f"A{linha_existente}:B{linha_existente}", [[CHAVE_TOKEN_DRIVE, ""]])
+    except Exception:
+        pass
 
 
 def salvar_linha_na_aba(planilha, nome_aba, linha):
@@ -276,7 +351,7 @@ def processar_callback_oauth_drive():
     try:
         token_data = trocar_code_por_token(code)
 
-        st.session_state["drive_token_info"] = {
+        token_info = {
             "token": token_data.get("access_token"),
             "refresh_token": token_data.get("refresh_token"),
             "token_uri": GOOGLE_TOKEN_URI,
@@ -284,6 +359,9 @@ def processar_callback_oauth_drive():
             "client_secret": GOOGLE_CLIENT_SECRET,
             "scopes": SCOPES_DRIVE_OAUTH,
         }
+
+        st.session_state["drive_token_info"] = token_info
+        salvar_token_drive_persistido(token_info)
 
         st.session_state["drive_oauth_state"] = None
         limpar_query_params()
@@ -317,7 +395,7 @@ def obter_credenciais_drive_usuario():
         try:
             novo_token = renovar_token_google(creds.refresh_token)
 
-            st.session_state["drive_token_info"] = {
+            token_atualizado = {
                 "token": novo_token.get("access_token"),
                 "refresh_token": token_info.get("refresh_token"),
                 "token_uri": GOOGLE_TOKEN_URI,
@@ -325,6 +403,9 @@ def obter_credenciais_drive_usuario():
                 "client_secret": GOOGLE_CLIENT_SECRET,
                 "scopes": SCOPES_DRIVE_OAUTH,
             }
+
+            st.session_state["drive_token_info"] = token_atualizado
+            salvar_token_drive_persistido(token_atualizado)
 
             creds = UserCredentials(
                 token=novo_token.get("access_token"),
@@ -336,6 +417,7 @@ def obter_credenciais_drive_usuario():
             )
         except Exception:
             st.session_state["drive_token_info"] = None
+            limpar_token_drive_persistido()
             return None
 
     if not creds.valid:
@@ -344,12 +426,28 @@ def obter_credenciais_drive_usuario():
     return creds
 
 
+def carregar_token_persistido_na_sessao():
+    if st.session_state.get("drive_token_carregado_persistencia"):
+        return
+
+    st.session_state["drive_token_carregado_persistencia"] = True
+
+    if st.session_state.get("drive_token_info"):
+        return
+
+    token_info = carregar_token_drive_persistido()
+    if token_info:
+        st.session_state["drive_token_info"] = token_info
+
+
 def drive_conectado():
+    carregar_token_persistido_na_sessao()
     creds = obter_credenciais_drive_usuario()
     return creds is not None
 
 
 def conectar_drive_usuario():
+    carregar_token_persistido_na_sessao()
     creds = obter_credenciais_drive_usuario()
     if not creds:
         raise RuntimeError(
@@ -376,6 +474,7 @@ def desconectar_drive_usuario():
 
     st.session_state["drive_token_info"] = None
     st.session_state["drive_oauth_state"] = None
+    limpar_token_drive_persistido()
     limpar_query_params()
 
 
@@ -875,6 +974,7 @@ Contato: {contato}"""
 # PROCESSA CALLBACK OAUTH ANTES DA UI
 # =========================================
 processar_callback_oauth_drive()
+carregar_token_persistido_na_sessao()
 
 
 # =========================================
