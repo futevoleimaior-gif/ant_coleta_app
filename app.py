@@ -58,6 +58,33 @@ FLYERS_OUTUBRO_FAZER = st.secrets.get("FLYERS_OUTUBRO_FAZER", "")
 FLYERS_NOVEMBRO_FAZER = st.secrets.get("FLYERS_NOVEMBRO_FAZER", "")
 FLYERS_DEZEMBRO_FAZER = st.secrets.get("FLYERS_DEZEMBRO_FAZER", "")
 
+# Pastas TORNEIOS por mês + agenda
+TORNEIOS_JANEIRO_SUL = st.secrets.get("TORNEIOS_JANEIRO_SUL", "")
+TORNEIOS_FEVEREIRO_SUL = st.secrets.get("TORNEIOS_FEVEREIRO_SUL", "")
+TORNEIOS_MARCO_SUL = st.secrets.get("TORNEIOS_MARCO_SUL", "")
+TORNEIOS_ABRIL_SUL = st.secrets.get("TORNEIOS_ABRIL_SUL", "")
+TORNEIOS_MAIO_SUL = st.secrets.get("TORNEIOS_MAIO_SUL", "")
+TORNEIOS_JUNHO_SUL = st.secrets.get("TORNEIOS_JUNHO_SUL", "")
+TORNEIOS_JULHO_SUL = st.secrets.get("TORNEIOS_JULHO_SUL", "")
+TORNEIOS_AGOSTO_SUL = st.secrets.get("TORNEIOS_AGOSTO_SUL", "")
+TORNEIOS_SETEMBRO_SUL = st.secrets.get("TORNEIOS_SETEMBRO_SUL", "")
+TORNEIOS_OUTUBRO_SUL = st.secrets.get("TORNEIOS_OUTUBRO_SUL", "")
+TORNEIOS_NOVEMBRO_SUL = st.secrets.get("TORNEIOS_NOVEMBRO_SUL", "")
+TORNEIOS_DEZEMBRO_SUL = st.secrets.get("TORNEIOS_DEZEMBRO_SUL", "")
+
+TORNEIOS_JANEIRO_NORTE = st.secrets.get("TORNEIOS_JANEIRO_NORTE", "")
+TORNEIOS_FEVEREIRO_NORTE = st.secrets.get("TORNEIOS_FEVEREIRO_NORTE", "")
+TORNEIOS_MARCO_NORTE = st.secrets.get("TORNEIOS_MARCO_NORTE", "")
+TORNEIOS_ABRIL_NORTE = st.secrets.get("TORNEIOS_ABRIL_NORTE", "")
+TORNEIOS_MAIO_NORTE = st.secrets.get("TORNEIOS_MAIO_NORTE", "")
+TORNEIOS_JUNHO_NORTE = st.secrets.get("TORNEIOS_JUNHO_NORTE", "")
+TORNEIOS_JULHO_NORTE = st.secrets.get("TORNEIOS_JULHO_NORTE", "")
+TORNEIOS_AGOSTO_NORTE = st.secrets.get("TORNEIOS_AGOSTO_NORTE", "")
+TORNEIOS_SETEMBRO_NORTE = st.secrets.get("TORNEIOS_SETEMBRO_NORTE", "")
+TORNEIOS_OUTUBRO_NORTE = st.secrets.get("TORNEIOS_OUTUBRO_NORTE", "")
+TORNEIOS_NOVEMBRO_NORTE = st.secrets.get("TORNEIOS_NOVEMBRO_NORTE", "")
+TORNEIOS_DEZEMBRO_NORTE = st.secrets.get("TORNEIOS_DEZEMBRO_NORTE", "")
+
 GOOGLE_CLIENT_ID = obter_secret_obrigatorio("GOOGLE_CLIENT_ID")
 GOOGLE_CLIENT_SECRET = obter_secret_obrigatorio("GOOGLE_CLIENT_SECRET")
 GOOGLE_REDIRECT_URI = obter_secret_obrigatorio("GOOGLE_REDIRECT_URI")
@@ -506,6 +533,46 @@ def obter_id_pasta_flyers(mes):
     return mapa.get(mes, "")
 
 
+def obter_id_pasta_torneios(mes, agenda):
+    agenda = (agenda or "").upper().strip()
+
+    mapa_sul = {
+        "1. Janeiro": TORNEIOS_JANEIRO_SUL,
+        "2. Fevereiro": TORNEIOS_FEVEREIRO_SUL,
+        "3. Março": TORNEIOS_MARCO_SUL,
+        "4. Abril": TORNEIOS_ABRIL_SUL,
+        "5. Maio": TORNEIOS_MAIO_SUL,
+        "6. Junho": TORNEIOS_JUNHO_SUL,
+        "7. Julho": TORNEIOS_JULHO_SUL,
+        "8. Agosto": TORNEIOS_AGOSTO_SUL,
+        "9. Setembro": TORNEIOS_SETEMBRO_SUL,
+        "10. Outubro": TORNEIOS_OUTUBRO_SUL,
+        "11. Novembro": TORNEIOS_NOVEMBRO_SUL,
+        "12. Dezembro": TORNEIOS_DEZEMBRO_SUL,
+    }
+
+    mapa_norte = {
+        "1. Janeiro": TORNEIOS_JANEIRO_NORTE,
+        "2. Fevereiro": TORNEIOS_FEVEREIRO_NORTE,
+        "3. Março": TORNEIOS_MARCO_NORTE,
+        "4. Abril": TORNEIOS_ABRIL_NORTE,
+        "5. Maio": TORNEIOS_MAIO_NORTE,
+        "6. Junho": TORNEIOS_JUNHO_NORTE,
+        "7. Julho": TORNEIOS_JULHO_NORTE,
+        "8. Agosto": TORNEIOS_AGOSTO_NORTE,
+        "9. Setembro": TORNEIOS_SETEMBRO_NORTE,
+        "10. Outubro": TORNEIOS_OUTUBRO_NORTE,
+        "11. Novembro": TORNEIOS_NOVEMBRO_NORTE,
+        "12. Dezembro": TORNEIOS_DEZEMBRO_NORTE,
+    }
+
+    if agenda == "SUL":
+        return mapa_sul.get(mes, "")
+    if agenda == "NORTE":
+        return mapa_norte.get(mes, "")
+    return ""
+
+
 def upload_arquivo_drive(service, uploaded_file, folder_id, nome_arquivo=None):
     if not folder_id:
         raise ValueError("ID da pasta não encontrado.")
@@ -645,14 +712,16 @@ def gerar_nome_flyer(uploaded_file, nome_base):
     return f"{nome_base}{extensao}"
 
 
-def gerar_fingerprint_salvamento(texto_confirmado, agenda, mes_1, mes_2, flyer_final):
+def gerar_fingerprint_salvamento(texto_confirmado, agenda, mes_1, mes_2, flyer_final, print_post):
     nome_flyer = flyer_final.name if flyer_final else ""
+    nome_print = print_post.name if print_post else ""
     base = "||".join([
         limpar_espacos(texto_confirmado),
         agenda or "",
         mes_1 or "",
         mes_2 or "",
-        nome_flyer
+        nome_flyer,
+        nome_print
     ])
     return hashlib.md5(base.encode("utf-8")).hexdigest()
 
@@ -1460,6 +1529,14 @@ with aba3:
         key="flyer_final"
     )
 
+    st.markdown("### 2.1 Print do post")
+
+    print_post = st.file_uploader(
+        "Upload do PRINT do post",
+        type=["jpg", "jpeg", "png"],
+        key="print_post"
+    )
+
     st.divider()
 
     st.markdown("### 3. Organização da agenda")
@@ -1569,6 +1646,8 @@ with aba3:
         erros.append("Cole o texto confirmado.")
     if flyer_final is None:
         erros.append("Envie o flyer final.")
+    if print_post is None:
+        erros.append("Envie o print do post.")
     if not agenda:
         erros.append("Selecione a agenda.")
     if not mes_1:
@@ -1603,7 +1682,8 @@ with aba3:
         agenda=agenda,
         mes_1=mes_1,
         mes_2=mes_2,
-        flyer_final=flyer_final
+        flyer_final=flyer_final,
+        print_post=print_post
     )
 
     if st.button("Validar linha final", key="btn_validar_linha_final"):
@@ -1623,59 +1703,133 @@ with aba3:
             st.warning("Este torneio já foi salvo nesta sessão. Altere algum dado antes de tentar salvar novamente.")
         else:
             client_gs = None
+
+            status_print = "❌"
+            status_sheet = "❌"
+            status_flyer = "❌"
+
+            erro_print = ""
+            erro_sheet = ""
+            erro_flyer = ""
+            nome_flyer_final = ""
+            nome_print_final = ""
+
             try:
                 client_gs = conectar_gsheet()
-                planilha = obter_planilha_por_agenda(client_gs, agenda)
-
-                salvar_linha_na_aba(planilha, mes_1, linha_macro)
-                if virada_mes and mes_2 and mes_2 != mes_1:
-                    salvar_linha_na_aba(planilha, mes_2, linha_macro)
-
-                nome_flyer_final = gerar_nome_flyer(flyer_final, nome_arquivo)
-
                 drive_service = conectar_drive_usuario()
 
-                pasta_flyers_mes_1 = obter_id_pasta_flyers(mes_1)
-                flyer_upload_1 = upload_arquivo_drive(
-                    drive_service,
-                    flyer_final,
-                    pasta_flyers_mes_1,
-                    nome_arquivo=nome_flyer_final
-                )
+                # =========================
+                # 1. SALVAR PRINT
+                # =========================
+                try:
+                    nome_print_final = gerar_nome_flyer(print_post, f"{nome_arquivo} - PRINT")
 
-                st.write("Flyer salvo em:", mes_1)
-                st.write("Nome no Drive:", flyer_upload_1.get("name"))
-                st.write("ID do arquivo:", flyer_upload_1.get("id"))
+                    pasta_torneios_mes_1 = obter_id_pasta_torneios(mes_1, agenda)
+                    upload_arquivo_drive(
+                        drive_service,
+                        print_post,
+                        pasta_torneios_mes_1,
+                        nome_arquivo=nome_print_final
+                    )
 
-                if virada_mes and mes_2 and mes_2 != mes_1:
-                    pasta_flyers_mes_2 = obter_id_pasta_flyers(mes_2)
-                    flyer_upload_2 = upload_arquivo_drive(
+                    if virada_mes and mes_2 and mes_2 != mes_1:
+                        pasta_torneios_mes_2 = obter_id_pasta_torneios(mes_2, agenda)
+                        upload_arquivo_drive(
+                            drive_service,
+                            print_post,
+                            pasta_torneios_mes_2,
+                            nome_arquivo=nome_print_final
+                        )
+
+                    status_print = "✅"
+                except Exception as e:
+                    erro_print = repr(e)
+
+                # =========================
+                # 2. SALVAR NA PLANILHA
+                # =========================
+                try:
+                    planilha = obter_planilha_por_agenda(client_gs, agenda)
+
+                    salvar_linha_na_aba(planilha, mes_1, linha_macro)
+
+                    if virada_mes and mes_2 and mes_2 != mes_1:
+                        salvar_linha_na_aba(planilha, mes_2, linha_macro)
+
+                    status_sheet = "✅"
+                except Exception as e:
+                    erro_sheet = repr(e)
+
+                # =========================
+                # 3. SALVAR FLYER
+                # =========================
+                try:
+                    nome_flyer_final = gerar_nome_flyer(flyer_final, nome_arquivo)
+
+                    pasta_flyers_mes_1 = obter_id_pasta_flyers(mes_1)
+                    upload_arquivo_drive(
                         drive_service,
                         flyer_final,
-                        pasta_flyers_mes_2,
+                        pasta_flyers_mes_1,
                         nome_arquivo=nome_flyer_final
                     )
 
-                    st.write("Flyer também salvo em:", mes_2)
-                    st.write("Nome no Drive (2º mês):", flyer_upload_2.get("name"))
-                    st.write("ID do arquivo (2º mês):", flyer_upload_2.get("id"))
+                    if virada_mes and mes_2 and mes_2 != mes_1:
+                        pasta_flyers_mes_2 = obter_id_pasta_flyers(mes_2)
+                        upload_arquivo_drive(
+                            drive_service,
+                            flyer_final,
+                            pasta_flyers_mes_2,
+                            nome_arquivo=nome_flyer_final
+                        )
 
-                registrar_log(
-                    client_gs=client_gs,
-                    torneio=torneio,
-                    cidade=cidade_uf,
-                    data_evento=data_evento_visual,
-                    agenda=agenda,
-                    mes_1=mes_1,
-                    mes_2=mes_2,
-                    nome_flyer=nome_flyer_final,
-                    status="SUCESSO",
-                    erro=""
-                )
+                    status_flyer = "✅"
+                except Exception as e:
+                    erro_flyer = repr(e)
+
+                # =========================
+                # 4. LOG
+                # =========================
+                erros_consolidados = []
+                if erro_print:
+                    erros_consolidados.append(f"PRINT: {erro_print}")
+                if erro_sheet:
+                    erros_consolidados.append(f"GOOGLE_SHEET: {erro_sheet}")
+                if erro_flyer:
+                    erros_consolidados.append(f"FLYER: {erro_flyer}")
+
+                status_final = "SUCESSO" if (
+                    status_print == "✅" and status_sheet == "✅" and status_flyer == "✅"
+                ) else "ERRO"
+
+                try:
+                    registrar_log(
+                        client_gs=client_gs,
+                        torneio=torneio,
+                        cidade=cidade_uf,
+                        data_evento=data_evento_visual,
+                        agenda=agenda,
+                        mes_1=mes_1,
+                        mes_2=mes_2,
+                        nome_flyer=nome_flyer_final if nome_flyer_final else nome_arquivo,
+                        status=status_final,
+                        erro=" | ".join(erros_consolidados)
+                    )
+                except Exception:
+                    pass
 
                 st.session_state["ultimo_salvamento_fingerprint"] = salvamento_atual_fingerprint
 
-                st.success("Linha salva na Google Sheet, flyer enviado ao Google Drive e LOG registrado com sucesso.")
+                st.divider()
+                st.markdown("### Resultado do registro")
+                st.write(f'Print salvo na pasta "Torneios" {status_print}')
+                st.write(f"Inclusão na Google Sheet {status_sheet}")
+                st.write(f'Flyer salvo na pasta "Fazer" {status_flyer}')
+
+                if status_final == "SUCESSO":
+                    st.success("Registro concluído com sucesso.")
+                else:
+                    st.warning("Uma ou mais etapas falharam. Consulte a aba LOG para verificar o motivo do erro.")
 
             except Exception as e:
                 if client_gs is not None:
@@ -1695,5 +1849,5 @@ with aba3:
                     except Exception:
                         pass
 
-                st.error("Ocorreu um erro ao salvar na Google Sheet e/ou no Google Drive.")
+                st.error("Erro geral no processo.")
                 st.code(repr(e))
