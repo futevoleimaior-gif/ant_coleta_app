@@ -601,6 +601,45 @@ def upload_arquivo_drive(service, uploaded_file, folder_id, nome_arquivo=None):
     return file
 
 
+def listar_arquivos_pasta_drive(service, folder_id):
+    if not folder_id:
+        raise ValueError("ID da pasta não encontrado.")
+
+    arquivos = []
+    page_token = None
+
+    while True:
+        resposta = service.files().list(
+            q=f"'{folder_id}' in parents and trashed = false",
+            fields="nextPageToken, files(id, name)",
+            pageToken=page_token,
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
+
+        arquivos.extend(resposta.get("files", []))
+        page_token = resposta.get("nextPageToken")
+
+        if not page_token:
+            break
+
+    return arquivos
+
+
+def excluir_arquivos_pasta_drive(service, folder_id):
+    arquivos = listar_arquivos_pasta_drive(service, folder_id)
+    quantidade = 0
+
+    for arquivo in arquivos:
+        service.files().delete(
+            fileId=arquivo["id"],
+            supportsAllDrives=True
+        ).execute()
+        quantidade += 1
+
+    return quantidade
+
+
 # =========================================
 # UTILITÁRIOS GERAIS
 # =========================================
@@ -724,6 +763,37 @@ def gerar_fingerprint_salvamento(texto_confirmado, agenda, mes_1, mes_2, flyer_f
         nome_print
     ])
     return hashlib.md5(base.encode("utf-8")).hexdigest()
+
+
+def numero_para_coluna_excel(num):
+    resultado = ""
+    while num > 0:
+        num, resto = divmod(num - 1, 26)
+        resultado = chr(65 + resto) + resultado
+    return resultado
+
+
+def limpar_aba_mantendo_cabecalho(planilha, nome_aba):
+    aba = planilha.worksheet(nome_aba)
+    valores = aba.get_all_values()
+
+    if len(valores) <= 1:
+        return 0
+
+    ultima_linha = len(valores)
+    maior_coluna = max(len(linha) for linha in valores) if valores else 1
+    ultima_coluna_letra = numero_para_coluna_excel(maior_coluna)
+
+    intervalo = f"A2:{ultima_coluna_letra}{ultima_linha}"
+    aba.batch_clear([intervalo])
+
+    return ultima_linha - 1
+
+
+def nome_mes_sem_numero(mes):
+    if ". " in mes:
+        return mes.split(". ", 1)[1]
+    return mes
 
 
 # =========================================
@@ -1365,10 +1435,11 @@ carregar_token_persistido_na_sessao()
 # =========================================
 st.title("🏆 APP ANT")
 
-aba1, aba2, aba3 = st.tabs([
+aba1, aba2, aba3, aba4 = st.tabs([
     "Extração individual",
     "Extração em lote",
-    "Registro final do torneio"
+    "Registro final do torneio",
+    "Limpeza pós-atualização"
 ])
 
 with aba1:
@@ -1562,6 +1633,8 @@ with aba3:
         "11. Novembro",
         "12. Dezembro"
     ]
+
+    meses_validos = meses[1:]
 
     mes_1 = st.selectbox("Mês principal", meses, key="mes_1")
 
@@ -1850,4 +1923,182 @@ with aba3:
                         pass
 
                 st.error("Erro geral no processo.")
+                st.code(repr(e))
+
+with aba4:
+    st.subheader("Tela 4 — Limpeza pós-atualização")
+    st.write("Execute a limpeza somente após concluir toda a atualização da ANT e a organização dos arquivos.")
+
+    st.divider()
+
+    st.markdown("### 1. Meses atualizados na ANT")
+
+    meses_limpeza = st.multiselect(
+        "Indique abaixo os meses atualizados na ANT",
+        options=meses_validos,
+        key="meses_limpeza"
+    )
+
+    st.divider()
+
+    st.markdown("### 2. Confirmações obrigatórias")
+
+    conf_sheet = st.checkbox(
+        "Confirmo que os dados das Google Sheets SUL e NORTE já foram inseridos na ANT",
+        key="conf_sheet_limpeza"
+    )
+
+    conf_prints = st.checkbox(
+        "Confirmo que os prints dos torneios NORTE e SUL já foram baixados para as pastas de atualização da ANT",
+        key="conf_prints_limpeza"
+    )
+
+    conf_flyers = st.checkbox(
+        "Confirmo que os flyers das pastas Fazer já foram baixados para a pasta Flyers_Montagem",
+        key="conf_flyers_limpeza"
+    )
+
+    conf_final = st.checkbox(
+        "Entendo que esta ação apagará os dados e arquivos dos meses selecionados",
+        key="conf_final_limpeza"
+    )
+
+    st.divider()
+
+    if st.button("Executar limpeza dos meses selecionados", key="btn_executar_limpeza"):
+        erros_limpeza = []
+
+        if not meses_limpeza:
+            erros_limpeza.append("Selecione ao menos um mês.")
+        if not conf_sheet:
+            erros_limpeza.append("Confirme que os dados das Google Sheets já foram inseridos na ANT.")
+        if not conf_prints:
+            erros_limpeza.append("Confirme que os prints dos torneios já foram baixados.")
+        if not conf_flyers:
+            erros_limpeza.append("Confirme que os flyers das pastas Fazer já foram baixados.")
+        if not conf_final:
+            erros_limpeza.append("Marque a confirmação final de limpeza.")
+        if not drive_conectado():
+            erros_limpeza.append("Conecte o Google Drive antes de executar a limpeza.")
+
+        if erros_limpeza:
+            st.error("A limpeza não pode ser executada porque ainda há pendências.")
+            for erro in erros_limpeza:
+                st.write(f"- {erro}")
+        else:
+            client_gs = None
+            relatorio_limpeza = []
+            erros_consolidados = []
+
+            try:
+                client_gs = conectar_gsheet()
+                drive_service = conectar_drive_usuario()
+
+                planilha_sul = obter_planilha_por_agenda(client_gs, "SUL")
+                planilha_norte = obter_planilha_por_agenda(client_gs, "NORTE")
+
+                for mes in meses_limpeza:
+                    mes_nome = nome_mes_sem_numero(mes)
+
+                    # =========================
+                    # GOOGLE SHEET SUL
+                    # =========================
+                    try:
+                        qtd_sul = limpar_aba_mantendo_cabecalho(planilha_sul, mes)
+                        relatorio_limpeza.append(f'Google Sheet SUL - {mes_nome} ✅ ({qtd_sul} linha(s) limpa(s))')
+                    except Exception as e:
+                        relatorio_limpeza.append(f'Google Sheet SUL - {mes_nome} ❌')
+                        erros_consolidados.append(f'GOOGLE_SHEET_SUL_{mes_nome.upper()}: {repr(e)}')
+
+                    # =========================
+                    # GOOGLE SHEET NORTE
+                    # =========================
+                    try:
+                        qtd_norte = limpar_aba_mantendo_cabecalho(planilha_norte, mes)
+                        relatorio_limpeza.append(f'Google Sheet NORTE - {mes_nome} ✅ ({qtd_norte} linha(s) limpa(s))')
+                    except Exception as e:
+                        relatorio_limpeza.append(f'Google Sheet NORTE - {mes_nome} ❌')
+                        erros_consolidados.append(f'GOOGLE_SHEET_NORTE_{mes_nome.upper()}: {repr(e)}')
+
+                    # =========================
+                    # TORNEIOS SUL
+                    # =========================
+                    try:
+                        pasta_torneios_sul = obter_id_pasta_torneios(mes, "SUL")
+                        qtd_torneios_sul = excluir_arquivos_pasta_drive(drive_service, pasta_torneios_sul)
+                        relatorio_limpeza.append(f'Pasta Torneios SUL - {mes_nome} ✅ ({qtd_torneios_sul} arquivo(s) excluído(s))')
+                    except Exception as e:
+                        relatorio_limpeza.append(f'Pasta Torneios SUL - {mes_nome} ❌')
+                        erros_consolidados.append(f'TORNEIOS_SUL_{mes_nome.upper()}: {repr(e)}')
+
+                    # =========================
+                    # TORNEIOS NORTE
+                    # =========================
+                    try:
+                        pasta_torneios_norte = obter_id_pasta_torneios(mes, "NORTE")
+                        qtd_torneios_norte = excluir_arquivos_pasta_drive(drive_service, pasta_torneios_norte)
+                        relatorio_limpeza.append(f'Pasta Torneios NORTE - {mes_nome} ✅ ({qtd_torneios_norte} arquivo(s) excluído(s))')
+                    except Exception as e:
+                        relatorio_limpeza.append(f'Pasta Torneios NORTE - {mes_nome} ❌')
+                        erros_consolidados.append(f'TORNEIOS_NORTE_{mes_nome.upper()}: {repr(e)}')
+
+                    # =========================
+                    # FLYERS FAZER
+                    # =========================
+                    try:
+                        pasta_flyers = obter_id_pasta_flyers(mes)
+                        qtd_flyers = excluir_arquivos_pasta_drive(drive_service, pasta_flyers)
+                        relatorio_limpeza.append(f'Pasta Flyers Fazer - {mes_nome} ✅ ({qtd_flyers} arquivo(s) excluído(s))')
+                    except Exception as e:
+                        relatorio_limpeza.append(f'Pasta Flyers Fazer - {mes_nome} ❌')
+                        erros_consolidados.append(f'FLYERS_FAZER_{mes_nome.upper()}: {repr(e)}')
+
+                status_limpeza = "SUCESSO" if not erros_consolidados else "ERRO"
+
+                try:
+                    registrar_log(
+                        client_gs=client_gs,
+                        torneio="LIMPEZA_POS_ATUALIZACAO",
+                        cidade="-",
+                        data_evento=", ".join(meses_limpeza),
+                        agenda="SUL/NORTE",
+                        mes_1=", ".join(meses_limpeza),
+                        mes_2="",
+                        nome_flyer="-",
+                        status=status_limpeza,
+                        erro=" | ".join(erros_consolidados)
+                    )
+                except Exception:
+                    pass
+
+                st.divider()
+                st.markdown("### Resultado da limpeza")
+
+                for linha in relatorio_limpeza:
+                    st.write(linha)
+
+                if status_limpeza == "SUCESSO":
+                    st.success("Limpeza concluída com sucesso para todos os meses selecionados.")
+                else:
+                    st.warning("A limpeza foi executada parcialmente. Consulte a aba LOG para verificar os detalhes dos erros.")
+
+            except Exception as e:
+                if client_gs is not None:
+                    try:
+                        registrar_log(
+                            client_gs=client_gs,
+                            torneio="LIMPEZA_POS_ATUALIZACAO",
+                            cidade="-",
+                            data_evento=", ".join(meses_limpeza) if meses_limpeza else "",
+                            agenda="SUL/NORTE",
+                            mes_1=", ".join(meses_limpeza) if meses_limpeza else "",
+                            mes_2="",
+                            nome_flyer="-",
+                            status="ERRO",
+                            erro=repr(e)
+                        )
+                    except Exception:
+                        pass
+
+                st.error("Erro geral ao executar a limpeza.")
                 st.code(repr(e))
